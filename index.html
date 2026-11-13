@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>口袋电台</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="口袋电台">
+<meta name="theme-color" content="#14181f">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="manifest" href="manifest.json">
+<style>
+/* 布局：上方搜索与筛选，中间电台列表，底部固定“刻度盘”播放条 */
+:root{
+  --bg:#f3f1ec; --panel:#ffffff; --ink:#1d2129; --muted:#6b6f78; --line:#e2ded5;
+  --accent:#c2410c; --accent-soft:#fbe6d9; --dial:#1b1f27; --dial-ink:#f5c26b; --dial-mute:#8c8f96;
+  --ok:#15803d; --bad:#b91c1c;
+  --f-body:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --f-num:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101318; --panel:#181c23; --ink:#eceae4; --muted:#9a9ea7; --line:#262b34;
+  --accent:#f59e5b; --accent-soft:#3a2617; --dial:#0a0c10; --dial-ink:#f5c26b; --dial-mute:#6f737b;
+  --ok:#4ade80; --bad:#f87171; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101318; --panel:#181c23; --ink:#eceae4; --muted:#9a9ea7; --line:#262b34;
+  --accent:#f59e5b; --accent-soft:#3a2617; --dial:#0a0c10; --dial-ink:#f5c26b; --dial-mute:#6f737b;
+  --ok:#4ade80; --bad:#f87171; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--f-body);-webkit-text-size-adjust:100%;
+  padding-bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding-top:calc(10px + env(safe-area-inset-top,0px));padding-bottom:8px;border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+h1{font-size:22px;margin:0;letter-spacing:.02em}
+.count{color:var(--muted);font-size:12px;font-family:var(--f-num)}
+.search{margin-top:8px;display:flex;gap:8px}
+.search input{flex:1;min-width:0;font:inherit;font-size:16px;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-top:8px;padding-bottom:2px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);font-size:14px;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.chips.region .chip{font-size:13px;padding:4px 10px}
+.chip small{opacity:.7;font-family:var(--f-num);margin-left:3px}
+main{padding-top:6px}
+.note{color:var(--muted);font-size:13px;padding:10px 0}
+.global{display:block;width:100%;text-align:left;padding:12px;margin:6px 0;border-radius:10px;border:1px dashed var(--accent);color:var(--accent)}
+ul{list-style:none;margin:0;padding:0}
+li.st{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.st .pick{flex:1;min-width:0;display:flex;align-items:center;gap:12px;text-align:left}
+.logo{flex:none;width:42px;height:42px;border-radius:10px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-weight:600;font-size:16px;overflow:hidden}
+.logo img{width:100%;height:100%;object-fit:cover;background:#fff}
+.meta{min-width:0}
+.name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.sub{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+li.st.on .name{color:var(--accent)}
+li.st.bad .name{text-decoration:line-through;opacity:.6}
+.fav{flex:none;width:40px;height:40px;display:grid;place-items:center;color:var(--muted);font-size:20px}
+.fav[aria-pressed="true"]{color:var(--accent)}
+.more{display:block;margin:14px auto;padding:10px 20px;border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+/* 播放条 */
+.player{position:fixed;left:0;right:0;bottom:0;z-index:10;background:var(--dial);color:#eee;
+  padding-top:10px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+.scale{position:relative;height:22px;margin-bottom:6px;overflow:hidden;border-radius:4px;background:
+  repeating-linear-gradient(90deg,var(--dial-mute) 0 1px,transparent 1px 8px) bottom/100% 7px no-repeat,
+  repeating-linear-gradient(90deg,var(--dial-ink) 0 1px,transparent 1px 40px) bottom/100% 13px no-repeat}
+.scale .nums{position:absolute;inset:0 0 auto 0;display:flex;justify-content:space-between;font:10px var(--f-num);color:var(--dial-mute);padding:0 2px}
+.needle{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);box-shadow:0 0 8px var(--accent);left:50%;transition:left .6s cubic-bezier(.2,.8,.2,1)}
+.prow{display:flex;align-items:center;gap:10px}
+.now{flex:1;min-width:0}
+.now .t{font-size:16px;font-weight:600;color:var(--dial-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.now .s{font-size:12px;color:var(--dial-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.now .s.err{color:#f87171}
+.ctl{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:#eee}
+.ctl svg{width:22px;height:22px;fill:currentColor}
+.ctl.main{width:52px;height:52px;background:var(--accent);color:#fff}
+.ctl.main svg{width:26px;height:26px}
+.sleep{font:11px var(--f-num);color:var(--dial-mute);border:1px solid #3a3f48;border-radius:999px;padding:3px 8px;flex:none}
+.sleep.on{color:var(--dial-ink);border-color:var(--dial-ink)}
+@media (prefers-reduced-motion:reduce){.needle{transition:none}}
+</style>
+</head>
+<body>
+<header class="wrap">
+  <div class="top"><h1>口袋电台</h1><span class="count" id="count"></span></div>
+  <div class="search"><input id="q" type="search" placeholder="搜台名、城市或频率，如 杭州 / 音乐 / 97.5" autocomplete="off" enterkeyhint="search"></div>
+  <div class="chips" id="cats" role="toolbar" aria-label="类型"></div>
+  <div class="chips region" id="regions" role="toolbar" aria-label="地区"></div>
+</header>
+<main class="wrap">
+  <div id="global"></div>
+  <ul id="list"></ul>
+  <button class="more" id="more" hidden>再显示 100 个</button>
+  <p class="note">电台数据来自公开的 Radio Browser 电台库，已在服务器上逐个试播过。个别台会因版权或线路临时断流，点下一个即可。</p>
+</main>
+<section class="player wrap" aria-label="播放器">
+  <div class="scale" aria-hidden="true"><div class="nums"><span>87</span><span>90</span><span>94</span><span>98</span><span>102</span><span>106</span><span>108</span></div><div class="needle" id="needle"></div></div>
+  <div class="prow">
+    <div class="now"><div class="t" id="nowT">选一个电台开始收听</div><div class="s" id="nowS">默认显示音乐台，可按省份筛选</div></div>
+    <button class="sleep" id="sleep" aria-label="定时关闭">定时</button>
+    <button class="ctl" id="prev" aria-label="上一个台"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg></button>
+    <button class="ctl main" id="play" aria-label="播放"><svg viewBox="0 0 24 24" id="playIco"><path d="M8 5v14l11-7z"/></svg></button>
+    <button class="ctl" id="next" aria-label="下一个台"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+  </div>
+</section>
+<audio id="au" preload="none" playsinline></audio>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js" async></script>
+<script>
+const $=s=>document.querySelector(s);
+const store={get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
+const CATS=["音乐","全部","新闻","交通","文艺","方言/民族","综合","收藏","最近"];
+const API=["https://de1.api.radio-browser.info","https://nl1.api.radio-browser.info","https://at1.api.radio-browser.info"];
+let ALL=[],view=[],shown=100,cat=store.get("cat","音乐"),region=store.get("region","全部地区");
+let favs=new Set(store.get("favs",[])),recent=store.get("recent",[]),bad=new Set();
+let cur=null,hls=null,wantPlay=false,stallTimer=null,sleepAt=0,sleepTimer=null;
+const au=$("#au");
+
+function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function byId(id){return ALL.find(s=>s.id===id)||store.get("extra",{})[id]}
+
+function renderCats(){
+  $("#cats").innerHTML=CATS.map(c=>`<button class="chip" aria-pressed="${c===cat}" data-c="${c}">${c==="音乐"?"♪ 音乐":c}</button>`).join("");
+}
+function renderRegions(){
+  const base=ALL.filter(s=>matchCat(s));
+  const cnt={};base.forEach(s=>cnt[s.r]=(cnt[s.r]||0)+1);
+  const order=Object.keys(cnt).sort((a,b)=>(a==="中央/全国"?-1:b==="中央/全国"?1:a==="网络/其他"?1:b==="网络/其他"?-1:cnt[b]-cnt[a]));
+  if(region!=="全部地区"&&!cnt[region])order.unshift(region);
+  $("#regions").innerHTML=[`<button class="chip" aria-pressed="${region==="全部地区"}" data-r="全部地区">全部地区<small>${base.length}</small></button>`]
+    .concat(order.map(r=>`<button class="chip" aria-pressed="${r===region}" data-r="${r}">${r}<small>${cnt[r]||0}</small></button>`)).join("");
+}
+function matchCat(s){
+  if(cat==="全部")return true;
+  if(cat==="收藏")return favs.has(s.id);
+  if(cat==="最近")return recent.includes(s.id);
+  return s.c.includes(cat);
+}
+function filter(){
+  const q=$("#q").value.trim().toLowerCase();
+  let src=ALL;
+  if(cat==="收藏"||cat==="最近"){
+    const ids=cat==="收藏"?[...favs]:recent;src=ids.map(byId).filter(Boolean);
+  }else src=ALL.filter(matchCat);
+  if(region!=="全部地区")src=src.filter(s=>s.r===region);
+  if(q)src=src.filter(s=>(s.n+" "+s.r).toLowerCase().includes(q));
+  view=src;shown=100;renderList();
+  $("#global").innerHTML=q?`<button class="global" id="gbtn">在全球电台库里搜「${esc(q)}」（含海外音乐台）</button>`:"";
+}
+function renderList(){
+  const items=view.slice(0,shown);
+  $("#list").innerHTML=items.length?items.map(s=>{
+    const ini=esc([...s.n.replace(/^(CNR|CRI|CCTV)[-\s]*/i,"")][0]||"♪");
+    return `<li class="st${cur&&cur.id===s.id?" on":""}${bad.has(s.id)?" bad":""}" data-id="${s.id}">
+      <button class="pick" data-play="${s.id}"><span class="logo">${s.f?`<img loading="lazy" src="${esc(s.f)}" alt="" onerror="this.replaceWith('${ini}')">`:ini}</span>
+      <span class="meta"><div class="name">${esc(s.n)}</div><div class="sub">${esc(s.r)} · ${esc(s.c.join(" / "))}</div></span></button>
+      <button class="fav" data-fav="${s.id}" aria-pressed="${favs.has(s.id)}" aria-label="收藏">${favs.has(s.id)?"♥":"♡"}</button></li>`}).join("")
+    :`<p class="note">${cat==="收藏"?"还没有收藏。点电台右侧的 ♡ 即可收藏。":cat==="最近"?"还没有收听记录。":"没有找到匹配的电台，可以试试全球搜索。"}</p>`;
+  $("#more").hidden=view.length<=shown;
+  $("#count").textContent=`${view.length} 个台`;
+}
+function setStatus(t,err){const e=$("#nowS");e.textContent=t;e.classList.toggle("err",!!err)}
+function setIcon(p){$("#playIco").innerHTML=p?'<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>':'<path d="M8 5v14l11-7z"/>';$("#play").setAttribute("aria-label",p?"暂停":"播放")}
+
+function play(s){
+  if(!s)return;cur=s;wantPlay=true;
+  $("#nowT").textContent=s.n;setStatus("正在连接…");
+  let h=0;for(const ch of s.id)h=(h*31+ch.charCodeAt(0))>>>0;$("#needle").style.left=(4+h%92)+"%";
+  recent=[s.id,...recent.filter(x=>x!==s.id)].slice(0,30);store.set("recent",recent);
+  if(hls){hls.destroy();hls=null}
+  const isHls=/\.m3u8(\?|$)/i.test(s.u);
+  if(isHls&&!au.canPlayType("application/vnd.apple.mpegurl")&&window.Hls&&Hls.isSupported()){
+    hls=new Hls();hls.loadSource(s.u);hls.attachMedia(au);
+    hls.on(Hls.Events.ERROR,(e,d)=>{if(!d.fatal)return;hls.destroy();hls=null;
+      if(au.canPlayType("application/x-mpegURL")!==""){au.src=s.u;au.play().catch(()=>fail())}else fail("此台在电脑浏览器受限，手机上可播")});
+  }else au.src=s.u;
+  au.play().catch(()=>{});
+  clearTimeout(stallTimer);stallTimer=setTimeout(()=>{if(au.paused||au.readyState<3)fail("连接超时")},15000);
+  renderList();meta(s);
+}
+function fail(msg){
+  if(!cur)return;clearTimeout(stallTimer);bad.add(cur.id);
+  setStatus((msg||"这个台暂时连不上")+"，点 ⏭ 换下一个",true);setIcon(false);renderList();
+}
+function step(d){
+  const list=view.length?view:ALL;if(!list.length)return;
+  let i=cur?list.findIndex(s=>s.id===cur.id):-1;
+  for(let k=0;k<list.length;k++){i=(i+d+list.length)%list.length;if(!bad.has(list[i].id))break}
+  play(list[i]);
+}
+function toggle(){
+  if(!cur){play(view[0]||ALL[0]);return}
+  if(au.paused){wantPlay=true;if(hls||au.src)au.play().catch(()=>play(cur));else play(cur)}
+  else{wantPlay=false;au.pause()}
+}
+function meta(s){
+  if(!("mediaSession" in navigator))return;
+  navigator.mediaSession.metadata=new MediaMetadata({title:s.n,artist:s.r+" · 口袋电台",artwork:[{src:s.f||"icon-512.png",sizes:"512x512"}]});
+}
+if("mediaSession" in navigator){
+  navigator.mediaSession.setActionHandler("play",toggle);navigator.mediaSession.setActionHandler("pause",toggle);
+  navigator.mediaSession.setActionHandler("previoustrack",()=>step(-1));navigator.mediaSession.setActionHandler("nexttrack",()=>step(1));
+}
+au.addEventListener("playing",()=>{clearTimeout(stallTimer);bad.delete(cur?.id);setStatus(`正在播放 · ${cur.r}`);setIcon(true)});
+au.addEventListener("pause",()=>{setIcon(false);if(cur&&!wantPlay)setStatus("已暂停")});
+au.addEventListener("waiting",()=>setStatus("缓冲中…"));
+au.addEventListener("error",()=>{if(!hls)fail()});
+
+async function globalSearch(q){
+  const g=$("#global");g.innerHTML='<p class="note">正在全球电台库里搜索…</p>';
+  for(const base of API){
+    try{
+      const r=await fetch(`${base}/json/stations/search?name=${encodeURIComponent(q)}&hidebroken=true&order=votes&reverse=true&limit=300`);
+      const d=await r.json();
+      const res=d.filter(x=>(x.url_resolved||x.url).startsWith("https")).map(x=>({id:x.stationuuid,n:x.name.trim(),u:x.url_resolved||x.url,
+        r:x.country||"海外",c:[(x.tags||"").split(",").filter(Boolean).slice(0,2).join(",")||"综合"],f:(x.favicon||"").startsWith("https")?x.favicon:"",v:x.votes}));
+      const extra=store.get("extra",{});res.forEach(s=>extra[s.id]=s);store.set("extra",extra);
+      view=res;shown=100;renderList();g.innerHTML=`<p class="note">全球库找到 ${res.length} 个可在手机上播放的台。清空搜索框可回到国内列表。</p>`;return;
+    }catch(e){}
+  }
+  g.innerHTML='<p class="note">全球搜索暂时连不上，请稍后再试。</p>';
+}
+function setSleep(){
+  const opts=[0,15,30,60,90];const curMin=sleepAt?Math.round((sleepAt-Date.now())/60000):0;
+  const nxt=opts[(opts.findIndex(m=>m>=curMin&&m>0)+1)%opts.length]||0;
+  const idx=opts.indexOf(nxt);
+  clearInterval(sleepTimer);sleepAt=nxt?Date.now()+nxt*60000:0;
+  const b=$("#sleep");b.classList.toggle("on",!!nxt);
+  const tick=()=>{if(!sleepAt){b.textContent="定时";return}const m=Math.ceil((sleepAt-Date.now())/60000);
+    if(m<=0){wantPlay=false;au.pause();sleepAt=0;b.classList.remove("on");b.textContent="定时";clearInterval(sleepTimer);setStatus("定时已到，已停止");return}
+    b.textContent=m+" 分";};
+  tick();if(nxt)sleepTimer=setInterval(tick,15000);
+}
+
+document.addEventListener("click",e=>{
+  const t=e.target.closest("button");if(!t)return;
+  if(t.dataset.c){cat=t.dataset.c;store.set("cat",cat);renderCats();renderRegions();filter()}
+  else if(t.dataset.r){region=t.dataset.r;store.set("region",region);renderRegions();filter()}
+  else if(t.dataset.play){play(view.find(s=>s.id===t.dataset.play)||byId(t.dataset.play))}
+  else if(t.dataset.fav){const id=t.dataset.fav;favs.has(id)?favs.delete(id):favs.add(id);store.set("favs",[...favs]);
+    if(!ALL.find(s=>s.id===id)){}renderList()}
+  else if(t.id==="gbtn")globalSearch($("#q").value.trim());
+  else if(t.id==="more"){shown+=100;renderList()}
+  else if(t.id==="play")toggle();else if(t.id==="next")step(1);else if(t.id==="prev")step(-1);
+  else if(t.id==="sleep")setSleep();
+});
+let qt;$("#q").addEventListener("input",()=>{clearTimeout(qt);qt=setTimeout(filter,150)});
+$("#q").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#q").blur()}});
+
+fetch("stations.json").then(r=>r.json()).then(d=>{ALL=d;
+  if(!CATS.includes(cat))cat="音乐";renderCats();renderRegions();filter();
+  const last=recent[0]&&byId(recent[0]);if(last){cur=last;$("#nowT").textContent=last.n;setStatus("上次收听 · 点 ▶ 继续");meta(last)}
+}).catch(()=>{$("#list").innerHTML='<p class="note">电台列表加载失败，请检查网络后刷新。</p>'});
+</script>
+</body>
+</html>
