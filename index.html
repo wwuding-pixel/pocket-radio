@@ -154,20 +154,41 @@ function filter(){
   if(region!=="全部地区")src=src.filter(s=>s.r===region);
   if(q)src=src.filter(s=>(s.n+" "+s.r+" "+s.c.join(" ")).toLowerCase().includes(q));
   if(cat!=="收藏"&&favs.size)src=[...src.filter(s=>favs.has(s.id)),...src.filter(s=>!favs.has(s.id))];
-  view=src;shown=100;renderList();
+  view=src;renderList();
   $("#global").innerHTML=q?`<button class="global" id="gbtn">在全球电台库里搜「${esc(q)}」（含海外音乐台）</button>`:"";
 }
+function rowHTML(s){
+  const ini=esc([...s.n.replace(/^(CNR|CRI|CCTV)[-\s]*/i,"")][0]||"♪");
+  return `<li class="st${cur&&cur.id===s.id?" on":""}${bad.has(s.id)?" bad":""}" data-id="${s.id}">
+      <button class="pick" data-play="${s.id}"><span class="logo">${s.f?`<img loading="lazy" src="${esc(s.f)}" alt="" onerror="this.replaceWith(this.dataset.i)" data-i="${ini}">`:ini}</span>
+      <span class="meta"><div class="name">${esc(s.n)}</div><div class="sub"><b class="pin"${favs.has(s.id)&&cat!=="收藏"?"":" hidden"}>已收藏 · </b>${esc(s.r)} · ${esc(s.c.filter(c=>c!=="综合").slice(0,3).join(" / ")||"综合")}${s.s!=null?` · <span class="spd">${s.s<1?"秒开":s.s.toFixed(1)+" 秒开播"}</span>`:""}</div></span></button>
+      <button class="fav" data-fav="${s.id}" aria-pressed="${favs.has(s.id)}" aria-label="收藏">${favs.has(s.id)?"♥":"♡"}</button></li>`;
+}
+/* 换分类/搜索时整表重画；加载更多只往后追加；播放、收藏只改对应那一行，避免 iPhone 上页面跳动和台标重载 */
 function renderList(){
-  const items=view.slice(0,shown);
-  $("#list").innerHTML=items.length?items.map(s=>{
-    const ini=esc([...s.n.replace(/^(CNR|CRI|CCTV)[-\s]*/i,"")][0]||"♪");
-    return `<li class="st${cur&&cur.id===s.id?" on":""}${bad.has(s.id)?" bad":""}" data-id="${s.id}">
-      <button class="pick" data-play="${s.id}"><span class="logo">${s.f?`<img loading="lazy" src="${esc(s.f)}" alt="" onerror="this.replaceWith('${ini}')">`:ini}</span>
-      <span class="meta"><div class="name">${esc(s.n)}</div><div class="sub">${favs.has(s.id)&&cat!=="收藏"?"<b class=\"pin\">已收藏</b> · ":""}${esc(s.r)} · ${esc(s.c.filter(c=>c!=="综合").slice(0,3).join(" / ")||"综合")}${s.s!=null?` · <span class="spd">${s.s<1?"秒开":s.s.toFixed(1)+" 秒开播"}</span>`:""}</div></span></button>
-      <button class="fav" data-fav="${s.id}" aria-pressed="${favs.has(s.id)}" aria-label="收藏">${favs.has(s.id)?"♥":"♡"}</button></li>`}).join("")
+  shown=Math.min(100,view.length);
+  $("#list").innerHTML=shown?view.slice(0,shown).map(rowHTML).join("")
     :`<p class="note">${cat==="收藏"?"还没有收藏。点电台右侧的 ♡ 即可收藏。":cat==="最近"?"还没有收听记录。":"没有找到匹配的电台，可以试试全球搜索。"}</p>`;
-  $("#more").hidden=view.length<=shown;
+  updateMore();
+}
+function appendMore(){
+  if(shown>=view.length)return;
+  const next=view.slice(shown,shown+100);shown+=next.length;
+  $("#list").insertAdjacentHTML("beforeend",next.map(rowHTML).join(""));
+  updateMore();
+}
+function updateMore(){
+  const left=view.length-shown;const m=$("#more");
+  m.hidden=left<=0;m.textContent=`再显示 ${Math.min(100,left)} 个（还有 ${left} 个）`;
   $("#count").textContent=`${view.length} 个台`;
+}
+function refreshRows(){
+  document.querySelectorAll("#list li.st").forEach(li=>{
+    const id=li.dataset.id,f=favs.has(id);
+    li.classList.toggle("on",!!cur&&cur.id===id);li.classList.toggle("bad",bad.has(id));
+    const b=li.querySelector(".fav");b.setAttribute("aria-pressed",f);b.textContent=f?"♥":"♡";
+    li.querySelector(".pin").hidden=!(f&&cat!=="收藏");
+  });
 }
 function setStatus(t,err){const e=$("#nowS");e.textContent=t;e.classList.toggle("err",!!err)}
 function setIcon(p){$("#playIco").innerHTML=p?'<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>':'<path d="M8 5v14l11-7z"/>';$("#play").setAttribute("aria-label",p?"暂停":"播放")}
@@ -186,11 +207,11 @@ function play(s){
   }else au.src=s.u;
   au.play().catch(()=>{});
   clearTimeout(stallTimer);stallTimer=setTimeout(()=>{if(au.paused||au.readyState<3)fail("连接超时")},15000);
-  renderList();meta(s);
+  refreshRows();meta(s);
 }
 function fail(msg){
   if(!cur)return;clearTimeout(stallTimer);bad.add(cur.id);
-  setStatus((msg||"这个台暂时连不上")+"，点 ⏭ 换下一个",true);setIcon(false);renderList();
+  setStatus((msg||"这个台暂时连不上")+"，点 ⏭ 换下一个",true);setIcon(false);refreshRows();
 }
 function step(d){
   const list=view.length?view:ALL;if(!list.length)return;
@@ -225,7 +246,7 @@ async function globalSearch(q){
       const res=d.filter(x=>(x.url_resolved||x.url).startsWith("https")).map(x=>({id:x.stationuuid,n:x.name.trim(),u:x.url_resolved||x.url,
         r:x.country||"海外",c:[(x.tags||"").split(",").filter(Boolean).slice(0,2).join(",")||"综合"],f:(x.favicon||"").startsWith("https")?x.favicon:"",v:x.votes}));
       const extra=store.get("extra",{});res.forEach(s=>extra[s.id]=s);store.set("extra",extra);
-      view=res;shown=100;renderList();g.innerHTML=`<p class="note">全球库找到 ${res.length} 个可在手机上播放的台。清空搜索框可回到国内列表。</p>`;return;
+      view=res;renderList();g.innerHTML=`<p class="note">全球库找到 ${res.length} 个可在手机上播放的台。清空搜索框可回到国内列表。</p>`;return;
     }catch(e){}
   }
   g.innerHTML='<p class="note">全球搜索暂时连不上，请稍后再试。</p>';
@@ -248,12 +269,13 @@ document.addEventListener("click",e=>{
   else if(t.dataset.r){region=t.dataset.r;store.set("region",region);renderRegions();filter()}
   else if(t.dataset.play){play(view.find(s=>s.id===t.dataset.play)||byId(t.dataset.play))}
   else if(t.dataset.fav){const id=t.dataset.fav;favs.has(id)?favs.delete(id):favs.add(id);store.set("favs",[...favs]);
-    const st=byId(id);if(st){const ex=store.get("extra",{});ex[id]=st;store.set("extra",ex)}renderList()}
+    const st=byId(id);if(st){const ex=store.get("extra",{});ex[id]=st;store.set("extra",ex)}refreshRows()}
   else if(t.id==="gbtn")globalSearch($("#q").value.trim());
-  else if(t.id==="more"){shown+=100;renderList()}
+  else if(t.id==="more")appendMore();
   else if(t.id==="play")toggle();else if(t.id==="next")step(1);else if(t.id==="prev")step(-1);
   else if(t.id==="sleep")setSleep();
 });
+if("IntersectionObserver" in window)new IntersectionObserver(es=>{if(es.some(e=>e.isIntersecting))appendMore()},{rootMargin:"0px 0px 600px 0px"}).observe($("#more"));
 let qt;$("#q").addEventListener("input",()=>{clearTimeout(qt);qt=setTimeout(filter,150)});
 $("#q").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#q").blur()}});
 
