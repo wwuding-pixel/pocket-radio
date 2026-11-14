@@ -1,2 +1,4 @@
 __pycache__/
 *.log
+*.report.txt
+*.tested.json

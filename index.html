@@ -61,6 +61,8 @@ li.st{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px 
 .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .sub{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 li.st.on .name{color:var(--accent)}
+.pin{color:var(--accent);font-weight:500}
+.spd{font-family:var(--f-num)}
 li.st.bad .name{text-decoration:line-through;opacity:.6}
 .fav{flex:none;width:40px;height:40px;display:grid;place-items:center;color:var(--muted);font-size:20px}
 .fav[aria-pressed="true"]{color:var(--accent)}
@@ -98,7 +100,7 @@ li.st.bad .name{text-decoration:line-through;opacity:.6}
   <div id="global"></div>
   <ul id="list"></ul>
   <button class="more" id="more" hidden>再显示 100 个</button>
-  <p class="note">电台数据来自公开的 Radio Browser 电台库，已在服务器上逐个试播过。个别台会因版权或线路临时断流，点下一个即可。</p>
+  <p class="note">电台来自蜻蜓FM公开频道和 Radio Browser 电台库。每个台都测过开播速度，超过 3 秒或下载跟不上码率的已去掉；同一路信号只保留最快的一个。个别台会临时断流，点 ⏭ 换下一个即可。</p>
 </main>
 <section class="player wrap" aria-label="播放器">
   <div class="scale" aria-hidden="true"><div class="nums"><span>87</span><span>90</span><span>94</span><span>98</span><span>102</span><span>106</span><span>108</span></div><div class="needle" id="needle"></div></div>
@@ -115,7 +117,8 @@ li.st.bad .name{text-decoration:line-through;opacity:.6}
 <script>
 const $=s=>document.querySelector(s);
 const store={get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
-const CATS=["音乐","全部","新闻","交通","文艺","方言/民族","综合","收藏","最近"];
+const CATS=["收藏","音乐","粤语","文艺","个人电台","全部","新闻","交通","方言/民族","综合","最近"];
+const CAT_LABEL={"收藏":"♥ 收藏","音乐":"♪ 音乐","个人电台":"主播/个人台"};
 const API=["https://de1.api.radio-browser.info","https://nl1.api.radio-browser.info","https://at1.api.radio-browser.info"];
 let ALL=[],view=[],shown=100,cat=store.get("cat","音乐"),region=store.get("region","全部地区");
 let favs=new Set(store.get("favs",[])),recent=store.get("recent",[]),bad=new Set();
@@ -126,12 +129,12 @@ function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;
 function byId(id){return ALL.find(s=>s.id===id)||store.get("extra",{})[id]}
 
 function renderCats(){
-  $("#cats").innerHTML=CATS.map(c=>`<button class="chip" aria-pressed="${c===cat}" data-c="${c}">${c==="音乐"?"♪ 音乐":c}</button>`).join("");
+  $("#cats").innerHTML=CATS.map(c=>`<button class="chip" aria-pressed="${c===cat}" data-c="${c}">${CAT_LABEL[c]||c}</button>`).join("");
 }
 function renderRegions(){
   const base=ALL.filter(s=>matchCat(s));
   const cnt={};base.forEach(s=>cnt[s.r]=(cnt[s.r]||0)+1);
-  const order=Object.keys(cnt).sort((a,b)=>(a==="中央/全国"?-1:b==="中央/全国"?1:a==="网络/其他"?1:b==="网络/其他"?-1:cnt[b]-cnt[a]));
+  const order=Object.keys(cnt).sort((a,b)=>(a==="中央/全国"?-1:b==="中央/全国"?1:(a==="网络/其他"||a==="海外华语")-(b==="网络/其他"||b==="海外华语")||cnt[b]-cnt[a]));
   if(region!=="全部地区"&&!cnt[region])order.unshift(region);
   $("#regions").innerHTML=[`<button class="chip" aria-pressed="${region==="全部地区"}" data-r="全部地区">全部地区<small>${base.length}</small></button>`]
     .concat(order.map(r=>`<button class="chip" aria-pressed="${r===region}" data-r="${r}">${r}<small>${cnt[r]||0}</small></button>`)).join("");
@@ -149,7 +152,8 @@ function filter(){
     const ids=cat==="收藏"?[...favs]:recent;src=ids.map(byId).filter(Boolean);
   }else src=ALL.filter(matchCat);
   if(region!=="全部地区")src=src.filter(s=>s.r===region);
-  if(q)src=src.filter(s=>(s.n+" "+s.r).toLowerCase().includes(q));
+  if(q)src=src.filter(s=>(s.n+" "+s.r+" "+s.c.join(" ")).toLowerCase().includes(q));
+  if(cat!=="收藏"&&favs.size)src=[...src.filter(s=>favs.has(s.id)),...src.filter(s=>!favs.has(s.id))];
   view=src;shown=100;renderList();
   $("#global").innerHTML=q?`<button class="global" id="gbtn">在全球电台库里搜「${esc(q)}」（含海外音乐台）</button>`:"";
 }
@@ -159,7 +163,7 @@ function renderList(){
     const ini=esc([...s.n.replace(/^(CNR|CRI|CCTV)[-\s]*/i,"")][0]||"♪");
     return `<li class="st${cur&&cur.id===s.id?" on":""}${bad.has(s.id)?" bad":""}" data-id="${s.id}">
       <button class="pick" data-play="${s.id}"><span class="logo">${s.f?`<img loading="lazy" src="${esc(s.f)}" alt="" onerror="this.replaceWith('${ini}')">`:ini}</span>
-      <span class="meta"><div class="name">${esc(s.n)}</div><div class="sub">${esc(s.r)} · ${esc(s.c.join(" / "))}</div></span></button>
+      <span class="meta"><div class="name">${esc(s.n)}</div><div class="sub">${favs.has(s.id)&&cat!=="收藏"?"<b class=\"pin\">已收藏</b> · ":""}${esc(s.r)} · ${esc(s.c.filter(c=>c!=="综合").slice(0,3).join(" / ")||"综合")}${s.s!=null?` · <span class="spd">${s.s<1?"秒开":s.s.toFixed(1)+" 秒开播"}</span>`:""}</div></span></button>
       <button class="fav" data-fav="${s.id}" aria-pressed="${favs.has(s.id)}" aria-label="收藏">${favs.has(s.id)?"♥":"♡"}</button></li>`}).join("")
     :`<p class="note">${cat==="收藏"?"还没有收藏。点电台右侧的 ♡ 即可收藏。":cat==="最近"?"还没有收听记录。":"没有找到匹配的电台，可以试试全球搜索。"}</p>`;
   $("#more").hidden=view.length<=shown;
@@ -244,7 +248,7 @@ document.addEventListener("click",e=>{
   else if(t.dataset.r){region=t.dataset.r;store.set("region",region);renderRegions();filter()}
   else if(t.dataset.play){play(view.find(s=>s.id===t.dataset.play)||byId(t.dataset.play))}
   else if(t.dataset.fav){const id=t.dataset.fav;favs.has(id)?favs.delete(id):favs.add(id);store.set("favs",[...favs]);
-    if(!ALL.find(s=>s.id===id)){}renderList()}
+    const st=byId(id);if(st){const ex=store.get("extra",{});ex[id]=st;store.set("extra",ex)}renderList()}
   else if(t.id==="gbtn")globalSearch($("#q").value.trim());
   else if(t.id==="more"){shown+=100;renderList()}
   else if(t.id==="play")toggle();else if(t.id==="next")step(1);else if(t.id==="prev")step(-1);
@@ -254,7 +258,10 @@ let qt;$("#q").addEventListener("input",()=>{clearTimeout(qt);qt=setTimeout(filt
 $("#q").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#q").blur()}});
 
 fetch("stations.json").then(r=>r.json()).then(d=>{ALL=d;
-  if(!CATS.includes(cat))cat="音乐";renderCats();renderRegions();filter();
+  const alias={};d.forEach(s=>(s.a||[]).forEach(a=>alias[a]=s.id));
+  const fix=ids=>[...new Set(ids.map(i=>alias[i]||i))];
+  favs=new Set(fix([...favs]));store.set("favs",[...favs]);recent=fix(recent);store.set("recent",recent);
+  if(!CATS.includes(cat))cat="音乐";if(store.get("cat",null)===null&&favs.size)cat="收藏";renderCats();renderRegions();filter();
   const last=recent[0]&&byId(recent[0]);if(last){cur=last;$("#nowT").textContent=last.n;setStatus("上次收听 · 点 ▶ 继续");meta(last)}
 }).catch(()=>{$("#list").innerHTML='<p class="note">电台列表加载失败，请检查网络后刷新。</p>'});
 </script>
