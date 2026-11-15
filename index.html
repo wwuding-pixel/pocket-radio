@@ -62,6 +62,9 @@ li.st{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px 
 .sub{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 li.st.on .name{color:var(--accent)}
 .pin{color:var(--accent);font-weight:500}
+.qt{display:inline-block;font-size:11px;line-height:1;padding:3px 5px;margin-right:6px;border-radius:4px;background:#e6f4ea;color:#1a7f37;vertical-align:2px;font-weight:500}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .qt{background:#16321f;color:#6ee08f}}
+:root[data-theme="dark"] .qt{background:#16321f;color:#6ee08f}
 .spd{font-family:var(--f-num)}
 li.st.bad .name{text-decoration:line-through;opacity:.6}
 .fav{flex:none;width:40px;height:40px;display:grid;place-items:center;color:var(--muted);font-size:20px}
@@ -154,16 +157,17 @@ function filter(){
     const ids=cat==="收藏"?[...favs]:recent;src=ids.map(byId).filter(Boolean);
   }else src=ALL.filter(matchCat);
   if(region!=="全部地区")src=src.filter(s=>s.r===region);
-  if(q)src=src.filter(s=>(s.n+" "+s.r+" "+s.c.join(" ")).toLowerCase().includes(q));
+  if(q)src=src.filter(s=>(s.n+" "+s.r+" "+s.c.join(" ")+(isQT(s)?" 蜻蜓 qingting":"")).toLowerCase().includes(q));
   if(cat!=="收藏"&&favs.size)src=[...src.filter(s=>favs.has(s.id)),...src.filter(s=>!favs.has(s.id))];
   view=src;renderList();
   $("#global").innerHTML=q?`<button class="global" id="gbtn">在全球电台库里搜「${esc(q)}」（含海外音乐台）</button>`:"";
 }
+const isQT=s=>/qingting\.fm|qtfm\.cn/.test(s.u);
 function rowHTML(s){
   const ini=esc([...s.n.replace(/^(CNR|CRI|CCTV)[-\s]*/i,"")][0]||"♪");
   return `<li class="st${cur&&cur.id===s.id?" on":""}${bad.has(s.id)?" bad":""}" data-id="${s.id}">
       <button class="pick" data-play="${s.id}"><span class="logo">${s.f?`<img loading="lazy" src="${esc(s.f)}" alt="" onerror="this.replaceWith(this.dataset.i)" data-i="${ini}">`:ini}</span>
-      <span class="meta"><div class="name">${esc(s.n)}</div><div class="sub"><b class="pin"${favs.has(s.id)&&cat!=="收藏"?"":" hidden"}>已收藏 · </b>${esc(s.r)} · ${esc(s.c.filter(c=>c!=="综合").slice(0,3).join(" / ")||"综合")}${s.s!=null?` · <span class="spd">${s.s<1?"秒开":s.s.toFixed(1)+" 秒开播"}</span>`:""}</div></span></button>
+      <span class="meta"><div class="name">${isQT(s)?'<span class="qt">蜻蜓</span>':""}${esc(s.n)}</div><div class="sub"><b class="pin"${favs.has(s.id)&&cat!=="收藏"?"":" hidden"}>已收藏 · </b>${esc(s.r)} · ${esc(s.c.filter(c=>c!=="综合").slice(0,3).join(" / ")||"综合")}${s.s!=null?` · <span class="spd">${s.s<1?"秒开":s.s.toFixed(1)+" 秒开播"}</span>`:""}</div></span></button>
       <button class="fav" data-fav="${s.id}" aria-pressed="${favs.has(s.id)}" aria-label="收藏">${favs.has(s.id)?"♥":"♡"}</button></li>`;
 }
 /* 换分类/搜索时整表重画；加载更多只往后追加；播放、收藏只改对应那一行，避免 iPhone 上页面跳动和台标重载 */
