@@ -33,7 +33,7 @@
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--f-body);-webkit-text-size-adjust:100%;
-  padding-bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+  padding-bottom:calc(170px + env(safe-area-inset-bottom,0px))}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
@@ -80,6 +80,7 @@ li.st.bad .name{text-decoration:line-through;opacity:.6}
 .now .t{font-size:16px;font-weight:600;color:var(--dial-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .now .s{font-size:12px;color:var(--dial-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .now .s.err{color:#f87171}
+.np{font-size:13px;color:#e8e6df;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:6px;padding-top:6px;border-top:1px solid #2a2e36}
 .ctl{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:#eee}
 .ctl svg{width:22px;height:22px;fill:currentColor}
 .ctl.main{width:52px;height:52px;background:var(--accent);color:#fff}
@@ -111,6 +112,7 @@ li.st.bad .name{text-decoration:line-through;opacity:.6}
     <button class="ctl main" id="play" aria-label="播放"><svg viewBox="0 0 24 24" id="playIco"><path d="M8 5v14l11-7z"/></svg></button>
     <button class="ctl" id="next" aria-label="下一个台"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
   </div>
+  <div class="np" id="nowP" hidden></div>
 </section>
 <audio id="au" preload="none" playsinline></audio>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js" async></script>
@@ -207,7 +209,7 @@ function play(s){
   }else au.src=s.u;
   au.play().catch(()=>{});
   clearTimeout(stallTimer);stallTimer=setTimeout(()=>{if(au.paused||au.readyState<3)fail("连接超时")},15000);
-  refreshRows();meta(s);
+  refreshRows();meta(s);startNow(s);
 }
 function fail(msg){
   if(!cur)return;clearTimeout(stallTimer);bad.add(cur.id);
@@ -224,9 +226,53 @@ function toggle(){
   if(au.paused){wantPlay=true;if(hls||au.src)au.play().catch(()=>play(cur));else play(cur)}
   else{wantPlay=false;au.pause()}
 }
-function meta(s){
+function meta(s,line){
   if(!("mediaSession" in navigator))return;
-  navigator.mediaSession.metadata=new MediaMetadata({title:s.n,artist:s.r+" · 口袋电台",artwork:[{src:s.f||"icon-512.png",sizes:"512x512"}]});
+  navigator.mediaSession.metadata=new MediaMetadata({title:line||s.n,artist:line?s.n:s.r+" · 口袋电台",artwork:[{src:s.f||"icon-512.png",sizes:"512x512"}]});
+}
+/* 正在播放信息：蜻蜓台读“当前节目/时段/主持人”；其他 MP3 台尝试读流里的歌名（ICY）。读不到就不显示。 */
+let nowTimer=0,nowTok=0;const icyNo=new Set();
+function showNow(s,line){
+  const e=$("#nowP");e.hidden=!line;e.textContent=line||"";meta(s,(line||"").replace(/^节目：|^♪ /,"").replace(/\s+\d\d:\d\d–\d\d:\d\d/,""));
+}
+function startNow(s){
+  clearTimeout(nowTimer);const tok=++nowTok;showNow(s,"");
+  const m=s.u.match(/(?:qingting\.fm|qtfm\.cn)\/live\/(\d+)/);
+  const again=(ms)=>{nowTimer=setTimeout(()=>{if(tok===nowTok)tick()},ms)};
+  async function tick(){
+    if(au.paused){again(15000);return}
+    try{
+      if(m){
+        const d=(await (await fetch(`https://rapi.qingting.fm/channels/${m[1]}`)).json()).Data||{};
+        const np=d.nowplaying;if(tok!==nowTok)return;
+        if(np&&np.title){
+          const who=(np.broadcasters||[]).map(b=>b.username).filter(Boolean).slice(0,2).join("、");
+          showNow(s,`节目：${np.title}  ${np.start_time.slice(0,5)}–${np.end_time.slice(0,5)}${who?"  主持："+who:""}`);
+        }
+        again(180000);
+      }else if(!/m3u8/i.test(s.u)&&!icyNo.has(s.id)){
+        const t=await icyTitle(s.u);if(tok!==nowTok)return;
+        if(t===null){icyNo.add(s.id);return}
+        if(t)showNow(s,"♪ "+t);
+        again(20000);
+      }
+    }catch(e){if(tok===nowTok)again(60000)}
+  }
+  tick();
+}
+async function icyTitle(u){
+  const ac=new AbortController();const to=setTimeout(()=>ac.abort(),8000);
+  try{
+    const r=await fetch(u,{headers:{"Icy-MetaData":"1"},signal:ac.signal});
+    const rd=r.body.getReader();let buf=new Uint8Array(0);
+    while(buf.length<70000){
+      const {value,done}=await rd.read();if(done)break;
+      const n=new Uint8Array(buf.length+value.length);n.set(buf);n.set(value,buf.length);buf=n;
+      const txt=new TextDecoder("latin1").decode(buf);const i=txt.indexOf("StreamTitle='");
+      if(i>=0){const j=txt.indexOf("';",i);if(j>0){ac.abort();return new TextDecoder().decode(buf.slice(i+13,j)).replace(/\.(mp3|aac|m4a)$/i,"").trim()}}
+    }
+    ac.abort();return null;
+  }catch(e){return null}finally{clearTimeout(to)}
 }
 if("mediaSession" in navigator){
   navigator.mediaSession.setActionHandler("play",toggle);navigator.mediaSession.setActionHandler("pause",toggle);
