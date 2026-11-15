@@ -159,8 +159,12 @@ def test_hls(u, t0):
     with open_url(u) as r: final = r.geturl(); text = r.read(200000).decode("utf-8", "ignore")
     if "#EXTM3U" not in text: return None
     if "#EXT-X-STREAM-INF" in text:
-        lines = [l for l in text.splitlines() if l and not l.startswith("#")]
-        final = urllib.parse.urljoin(final, lines[0])
+        vs, bw = [], 0
+        for l in text.splitlines():
+            m = re.search(r"BANDWIDTH=(\d+)", l)
+            if m: bw = int(m.group(1))
+            elif l and not l.startswith("#"): vs.append((bw if bw <= 400000 else -1, l)); bw = 0
+        final = urllib.parse.urljoin(final, max(vs)[1])   # 选码率最高的纯音频档
         with open_url(final) as r: final = r.geturl(); text = r.read(200000).decode("utf-8", "ignore")
     segs = [l for l in text.splitlines() if l and not l.startswith("#")]
     durs = [float(x) for x in re.findall(r"#EXTINF:([\d.]+)", text)]
@@ -177,7 +181,27 @@ def test_hls(u, t0):
     dl = time.time() - ts
     start = time.time() - t0
     if len(data) < 1000: return None
-    return start, dur / max(dl, 0.01)
+    return start, dur / max(dl, 0.01), round(len(data) * 8 / max(dur, 1) / 1000 / 1.08)   # 扣掉 TS 封装开销
+
+MP3_BR = {1: [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320], 2: [0,8,16,24,32,40,48,56,64,80,96,112,128,144,160]}
+AAC_SR = [96000,88200,64000,48000,44100,32000,24000,22050,16000,12000,11025,8000,7350]
+def audio_kbps(b):
+    """从流的头几 KB 里读出码率：MP3 读帧头，AAC(ADTS) 用帧长推算。读不出返回 0。"""
+    mp3, aac = Counter(), []
+    i = 0
+    while i < len(b) - 7 and len(aac) < 60 and sum(mp3.values()) < 60:
+        if b[i] == 0xFF and (b[i+1] & 0xF6) == 0xF0:          # ADTS
+            sr = AAC_SR[(b[i+2] >> 2) & 0xF] if ((b[i+2] >> 2) & 0xF) < 13 else 0
+            fl = ((b[i+3] & 3) << 11) | (b[i+4] << 3) | (b[i+5] >> 5)
+            if sr and 7 < fl < 8192: aac.append(fl * 8 * sr / 1024 / 1000); i += fl; continue
+        if b[i] == 0xFF and (b[i+1] & 0xE0) == 0xE0 and ((b[i+1] >> 1) & 3) == 1:   # MPEG Layer III
+            ver = (b[i+1] >> 3) & 3; idx = b[i+2] >> 4
+            if ver != 1 and 0 < idx < 15:
+                mp3[MP3_BR[1 if ver == 3 else 2][idx]] += 1
+        i += 1
+    if len(aac) >= 5: return round(sum(aac) / len(aac))
+    if mp3: k, n = mp3.most_common(1)[0]; return k if n >= 3 else 0
+    return 0
 
 def test(c):
     u = c["u"]
@@ -187,7 +211,7 @@ def test(c):
         if re.search(r"\.m3u8(\?|$)", u, re.I):
             res = test_hls(u, t0)
             if not res: return None
-            start, ratio = res
+            start, ratio, kb = res
         else:
             with open_url(u) as r:
                 final = r.geturl()
@@ -198,17 +222,19 @@ def test(c):
                 if b"#EXTM3U" in first:   # 没有 .m3u8 后缀的 HLS
                     res = test_hls(final, t0)
                     if not res: return None
-                    start, ratio = res
+                    start, ratio, kb = res
                 else:
                     if "html" in ct or "json" in ct or "text" in ct: return None
-                    n, secs, _ = read_for(r, TEST_SECS)
+                    icybr = r.headers.get("icy-br") or ""
+                    n, secs, body = read_for(r, TEST_SECS)
+                    kb = audio_kbps(first + body) or (int(icybr.split(",")[0]) if icybr.split(",")[0].isdigit() else 0) or c["br"] or 0
                     n += len(first)
                     kbps = n * 8 / 1000 / max(secs + (ttfb if secs < 0.5 else 0), 0.5)
                     need = max(c["br"] or 64, 32)
                     start, ratio = ttfb, kbps / need
                 u = final if final.startswith("https") else u
         if start > MAX_START or ratio < MIN_RATIO: return None
-        return u, round(start, 2)
+        return u, round(start, 2), kb
     except Exception:
         return None
 
@@ -231,7 +257,7 @@ with cf.ThreadPoolExecutor(24) as ex:
 ok = ok if not cands else []
 for c, r in zip(cands, res):
     if r:
-        c["u"], c["s"] = r
+        c["u"], c["s"], c["k"] = r
         ok.append(c)
 print(f"tested {len(cands)} in {time.time()-t:.0f}s, fast enough: {len(ok)}")
 if cands: json.dump(ok, open(CACHE, "w", encoding="utf-8"), ensure_ascii=False)
@@ -260,7 +286,10 @@ groups = {}
 for i in range(len(ok)): groups.setdefault(find(i), []).append(ok[i])
 final = []
 for g in groups.values():
-    best = min(g, key=lambda c: (bool(re.search(r"m3u8", c["u"], re.I)), c["s"], -c["v"]))   # 同一个台优先 MP3，兼容性更好
+    anchor = min(g, key=lambda c: (bool(re.search(r"m3u8", c["u"], re.I)), c["s"], -c["v"]))   # MP3 优先，兼容性最好，也用来定 id
+    ak = anchor.get("k") or 0
+    hi = [c for c in g if 0 < (c.get("k") or 0) <= 400 and (c.get("k") or 0) >= max(ak, 48) * 1.25]
+    best = max(hi, key=lambda c: (c["k"], -c["s"])) if hi else anchor     # 有明显更高音质的地址就用它
     names = sorted(g, key=lambda c: (c["src"] != "qt", -c["v"]))   # 名称和图标优先用蜻蜓的
     cats = []
     for c in g:
@@ -268,9 +297,10 @@ for g in groups.values():
             if x not in cats: cats.append(x)
     if len(cats) > 1 and "综合" in cats: cats.remove("综合")
     reg = next((c["r"] for c in names if c["r"] not in ("网络/其他",)), best["r"])
-    final.append(dict(id=re.sub(r"[^a-z0-9]", "", url_key(best["u"]))[-24:] or str(len(final)),
+    final.append(dict(id=re.sub(r"[^a-z0-9]", "", url_key(anchor["u"]))[-24:] or str(len(final)),
                       n=names[0]["n"], u=best["u"], r=reg, c=cats, v=max(c["v"] for c in g),
-                      f=next((c["f"] for c in names if c["f"]), ""), s=best["s"]))
+                      f=next((c["f"] for c in names if c["f"]), ""), s=best["s"], k=(best.get("k") or 0) if (best.get("k") or 0) <= 400 else 0,
+                      **({"u2": anchor["u"]} if best is not anchor else {})))
 # 粤语只留：两广/港澳/海外华语，或台名明确写了粤语的
 CANTO_OK = ("广东", "广西", "香港", "澳门", "海外华语", "网络/其他")
 for x in final:

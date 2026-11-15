@@ -66,6 +66,8 @@ li.st.on .name{color:var(--accent)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .qt{background:#16321f;color:#6ee08f}}
 :root[data-theme="dark"] .qt{background:#16321f;color:#6ee08f}
 .spd{font-family:var(--f-num)}
+.br{font-family:var(--f-num)}
+.br.hi{color:var(--accent);font-weight:600}
 li.st.bad .name{text-decoration:line-through;opacity:.6}
 .fav{flex:none;width:40px;height:40px;display:grid;place-items:center;color:var(--muted);font-size:20px}
 .fav[aria-pressed="true"]{color:var(--accent)}
@@ -162,12 +164,12 @@ function filter(){
   view=src;renderList();
   $("#global").innerHTML=q?`<button class="global" id="gbtn">在全球电台库里搜「${esc(q)}」（含海外音乐台）</button>`:"";
 }
-const isQT=s=>/qingting\.fm|qtfm\.cn/.test(s.u);
+const isQT=s=>/qingting\.fm|qtfm\.cn/.test(s.u+" "+(s.u2||""));
 function rowHTML(s){
   const ini=esc([...s.n.replace(/^(CNR|CRI|CCTV)[-\s]*/i,"")][0]||"♪");
   return `<li class="st${cur&&cur.id===s.id?" on":""}${bad.has(s.id)?" bad":""}" data-id="${s.id}">
       <button class="pick" data-play="${s.id}"><span class="logo">${s.f?`<img loading="lazy" src="${esc(s.f)}" alt="" onerror="this.replaceWith(this.dataset.i)" data-i="${ini}">`:ini}</span>
-      <span class="meta"><div class="name">${isQT(s)?'<span class="qt">蜻蜓</span>':""}${esc(s.n)}</div><div class="sub"><b class="pin"${favs.has(s.id)&&cat!=="收藏"?"":" hidden"}>已收藏 · </b>${esc(s.r)} · ${esc(s.c.filter(c=>c!=="综合").slice(0,3).join(" / ")||"综合")}${s.s!=null?` · <span class="spd">${s.s<1?"秒开":s.s.toFixed(1)+" 秒开播"}</span>`:""}</div></span></button>
+      <span class="meta"><div class="name">${isQT(s)?'<span class="qt">蜻蜓</span>':""}${esc(s.n)}</div><div class="sub"><b class="pin"${favs.has(s.id)&&cat!=="收藏"?"":" hidden"}>已收藏 · </b>${esc(s.r)} · ${esc(s.c.filter(c=>c!=="综合").slice(0,3).join(" / ")||"综合")}${s.k?` · <span class="br${s.k>=96?" hi":""}">${s.k}k</span>`:""}${s.s!=null?` · <span class="spd">${s.s<1?"秒开":s.s.toFixed(1)+" 秒开播"}</span>`:""}</div></span></button>
       <button class="fav" data-fav="${s.id}" aria-pressed="${favs.has(s.id)}" aria-label="收藏">${favs.has(s.id)?"♥":"♡"}</button></li>`;
 }
 /* 换分类/搜索时整表重画；加载更多只往后追加；播放、收藏只改对应那一行，避免 iPhone 上页面跳动和台标重载 */
@@ -199,24 +201,25 @@ function refreshRows(){
 function setStatus(t,err){const e=$("#nowS");e.textContent=t;e.classList.toggle("err",!!err)}
 function setIcon(p){$("#playIco").innerHTML=p?'<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>':'<path d="M8 5v14l11-7z"/>';$("#play").setAttribute("aria-label",p?"暂停":"播放")}
 
-function play(s){
-  if(!s)return;cur=s;wantPlay=true;
+function play(s,url){
+  if(!s)return;cur=s;wantPlay=true;url=url||s.u;s._fb=url!==s.u;
   $("#nowT").textContent=s.n;setStatus("正在连接…");
   let h=0;for(const ch of s.id)h=(h*31+ch.charCodeAt(0))>>>0;$("#needle").style.left=(4+h%92)+"%";
   recent=[s.id,...recent.filter(x=>x!==s.id)].slice(0,30);store.set("recent",recent);
   if(hls){hls.destroy();hls=null}
-  const isHls=/\.m3u8(\?|$)/i.test(s.u);
+  const isHls=/\.m3u8(\?|$)/i.test(url);
   if(isHls&&!au.canPlayType("application/vnd.apple.mpegurl")&&window.Hls&&Hls.isSupported()){
-    hls=new Hls();hls.loadSource(s.u);hls.attachMedia(au);
+    hls=new Hls();hls.loadSource(url);hls.attachMedia(au);
     hls.on(Hls.Events.ERROR,(e,d)=>{if(!d.fatal)return;hls.destroy();hls=null;
-      if(au.canPlayType("application/x-mpegURL")!==""){au.src=s.u;au.play().catch(()=>fail())}else fail("此台在电脑浏览器受限，手机上可播")});
-  }else au.src=s.u;
+      if(au.canPlayType("application/x-mpegURL")!==""){au.src=url;au.play().catch(()=>fail())}else fail("此台在电脑浏览器受限，手机上可播")});
+  }else au.src=url;
   au.play().catch(()=>{});
   clearTimeout(stallTimer);stallTimer=setTimeout(()=>{if(au.paused||au.readyState<3)fail("连接超时")},15000);
   refreshRows();meta(s);startNow(s);
 }
 function fail(msg){
-  if(!cur)return;clearTimeout(stallTimer);bad.add(cur.id);
+  if(!cur)return;
+  if(cur.u2&&!cur._fb){setStatus("高音质线路连不上，换普通线路…");play(cur,cur.u2);return}clearTimeout(stallTimer);bad.add(cur.id);
   setStatus((msg||"这个台暂时连不上")+"，点 ⏭ 换下一个",true);setIcon(false);refreshRows();
 }
 function step(d){
@@ -241,7 +244,7 @@ function showNow(s,line){
 }
 function startNow(s){
   clearTimeout(nowTimer);const tok=++nowTok;showNow(s,"");
-  const m=s.u.match(/(?:qingting\.fm|qtfm\.cn)\/live\/(\d+)/);
+  const m=(s.u+" "+(s.u2||"")).match(/(?:qingting\.fm|qtfm\.cn)\/live\/(\d+)/);
   const again=(ms)=>{nowTimer=setTimeout(()=>{if(tok===nowTok)tick()},ms)};
   async function tick(){
     if(au.paused){again(15000);return}
@@ -282,7 +285,7 @@ if("mediaSession" in navigator){
   navigator.mediaSession.setActionHandler("play",toggle);navigator.mediaSession.setActionHandler("pause",toggle);
   navigator.mediaSession.setActionHandler("previoustrack",()=>step(-1));navigator.mediaSession.setActionHandler("nexttrack",()=>step(1));
 }
-au.addEventListener("playing",()=>{clearTimeout(stallTimer);bad.delete(cur?.id);setStatus(`正在播放 · ${cur.r}`);setIcon(true)});
+au.addEventListener("playing",()=>{clearTimeout(stallTimer);bad.delete(cur?.id);setStatus(`正在播放 · ${cur.r}${cur.k?" · "+(cur._fb?"普通线路":cur.k+"k"):""}`);setIcon(true)});
 au.addEventListener("pause",()=>{setIcon(false);if(cur&&!wantPlay)setStatus("已暂停")});
 au.addEventListener("waiting",()=>setStatus("缓冲中…"));
 au.addEventListener("error",()=>{if(!hls)fail()});
